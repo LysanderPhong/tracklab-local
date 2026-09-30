@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import tempfile
 import threading
+import time
 import unittest
 import urllib.request
 import zipfile
@@ -36,3 +37,21 @@ class LocalPackageTests(unittest.TestCase):
                         self.assertEqual(res.status,200)
                         self.assertIn(needle,res.read())
             finally:http.shutdown();http.server_close();thread.join()
+
+    def test_status_stays_responsive_during_a_device_operation(self):
+        http=server.ThreadingHTTPServer(('127.0.0.1',0),server.Handler)
+        thread=threading.Thread(target=http.serve_forever,daemon=True)
+        with tempfile.TemporaryDirectory() as temp, patch.object(server,'PORT',http.server_port), \
+             patch.object(server,'MARKER',Path(temp)/'needs-clear.json'):
+            thread.start()
+            server.LOCK.acquire()
+            try:
+                started=time.monotonic()
+                with urllib.request.urlopen(f'http://127.0.0.1:{http.server_port}/api/status',timeout=1) as res:
+                    state=json.load(res)
+                self.assertLess(time.monotonic()-started,1)
+                self.assertTrue(state['operation_pending'])
+                self.assertFalse(state['needs_clear'])
+            finally:
+                server.LOCK.release()
+                http.shutdown();http.server_close();thread.join()

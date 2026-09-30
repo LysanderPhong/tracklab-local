@@ -14,7 +14,7 @@
 
 ## 先下载
 
-**[点这里下载本地版 ZIP](https://github.com/LysanderPhong/tracklab-local/releases/download/v0.5.0-beta/TrackLab-Local-0.5.0-beta.zip)** · [查看版本说明](https://github.com/LysanderPhong/tracklab-local/releases)
+**[点这里下载本地版 ZIP](https://github.com/LysanderPhong/tracklab-local/releases/download/v0.5.1-beta/TrackLab-Local-0.5.1-beta.zip)** · [查看版本说明](https://github.com/LysanderPhong/tracklab-local/releases)
 
 下载后先把整个压缩包解压出来，不要在压缩包里直接双击运行。
 

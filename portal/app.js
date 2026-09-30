@@ -117,6 +117,8 @@ $('pair-form').onsubmit=async e=>{e.preventDefault();await pairConnection('/api/
 $('unpair').onclick=async()=>{busy=true;controls();try{await api('/api/unpair',{});credentials=null;command=null;online=false;device={ready:false};try{sessionStorage.removeItem('tracklab.connection');}catch{}note('已解除配对。连接程序会停止续期，请检查手机是否恢复真实位置。');}catch(error){note(error.message,true);}finally{busy=false;controls();}};
 async function send(action,payload={}){
   if(busy)return;busy=true;controls();
+  const inProgress={scan:'正在检查手机连接…',clear:'正在恢复真实定位，请保持手机连接…',fixed:'正在检查设备并启动固定定位…',route:'正在检查设备并启动动态路线…'};
+  if(inProgress[action])note(inProgress[action]);
   try{
     if(mode==='local'){
       const result=await api('/api/'+(action==='route'?'start':action),payload);

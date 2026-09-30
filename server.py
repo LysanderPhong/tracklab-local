@@ -127,12 +127,19 @@ class Handler(BaseHTTPRequestHandler):
         except RelayError as error:
             return self.respond(error.status, {'error': str(error)})
         if self.path in {"/api/bootstrap", "/api/status"}:
-            with LOCK:
-                state = reconcile()
-                result = {"needs_clear": MARKER.exists(), "replay": state, "version": "0.4.0"}
+            # A device check can take 15 seconds. Status is read-only and can
+            # safely show the latest acknowledged state while that check runs.
+            acquired = LOCK.acquire(blocking=False)
+            try:
+                state = reconcile() if acquired else runner.status()
+                result = {"needs_clear": MARKER.exists(), "replay": state,
+                          "operation_pending": not acquired, "version": "0.4.0"}
                 if self.path == "/api/bootstrap":
                     result['token'] = TOKEN
-                return self.respond(200, result)
+            finally:
+                if acquired:
+                    LOCK.release()
+            return self.respond(200, result)
         if self.path == "/favicon.ico":
             return self.respond(204, b"", "image/x-icon")
         return self.respond(404, {"error": "页面不存在。"})
