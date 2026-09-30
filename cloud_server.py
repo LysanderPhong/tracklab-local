@@ -65,7 +65,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         for k, v in {'Content-Type': kind, 'Content-Length': str(len(body)), 'Cache-Control': cache,
                      'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'strict-origin-when-cross-origin',
-                     'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+                     'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://tile.openstreetmap.org; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
                      'Permissions-Policy': 'geolocation=()'}.items():
             self.send_header(k, v)
         self.end_headers()

@@ -15,7 +15,8 @@ function validPlace(p){return p&&typeof p.name==='string'&&p.name.length<=160&&t
 try {const value=JSON.parse(localStorage.getItem(storageKey)||'[]');if(Array.isArray(value))favorites=value.filter(validPlace).slice(0,20);}catch{note('常用地点未能读取，可重新选择并收藏。',true);}
 try {const value=JSON.parse(sessionStorage.getItem('tracklab.connection')||'null');if(value&&typeof value.session==='string'&&typeof value.token==='string')credentials=value;}catch{}
 const map=L.map('map',{zoomControl:true,attributionControl:true}).setView([18.405,110.015],14);
-const tiles=L.tileLayer('/tiles/{z}/{x}/{y}.png',{maxZoom:19,minZoom:2,attribution:'© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a>'}).addTo(map);
+// Browser caching and multiplexing keep map panning independent of the Python service.
+const tiles=L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,minZoom:2,attribution:'© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a>'}).addTo(map);
 tiles.on('tileerror',()=>{$('map-error').hidden=false;});
 let marker=null;
 const icon=L.divIcon({className:'pin',html:'<span></span>',iconSize:[28,34],iconAnchor:[12,28]});

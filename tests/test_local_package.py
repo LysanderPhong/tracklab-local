@@ -38,6 +38,21 @@ class LocalPackageTests(unittest.TestCase):
                         self.assertIn(needle,res.read())
             finally:http.shutdown();http.server_close();thread.join()
 
+    def test_map_tiles_use_browser_cache_and_are_allowed_by_page_policy(self):
+        script=(Path(__file__).resolve().parents[1]/'portal/app.js').read_text()
+        self.assertIn("L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png'",script)
+        self.assertNotIn("L.tileLayer('/tiles/",script)
+        http=server.ThreadingHTTPServer(('127.0.0.1',0),server.Handler)
+        thread=threading.Thread(target=http.serve_forever,daemon=True)
+        with patch.object(server,'PORT',http.server_port):
+            thread.start()
+            try:
+                with urllib.request.urlopen(f'http://127.0.0.1:{http.server_port}/fixed') as res:
+                    self.assertIn('img-src \'self\' data: https://tile.openstreetmap.org',
+                                  res.headers['Content-Security-Policy'])
+                    self.assertEqual(res.headers['Referrer-Policy'],'strict-origin-when-cross-origin')
+            finally:http.shutdown();http.server_close();thread.join()
+
     def test_status_stays_responsive_during_a_device_operation(self):
         http=server.ThreadingHTTPServer(('127.0.0.1',0),server.Handler)
         thread=threading.Thread(target=http.serve_forever,daemon=True)

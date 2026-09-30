@@ -5,7 +5,7 @@ import json
 import zipfile
 
 ROOT=Path(__file__).resolve().parent
-VERSION='0.5.1-beta'
+VERSION='0.5.2-beta'
 FILES=['README.md','THIRD_PARTY.md','LICENSE','.gitignore','pyproject.toml','uv.lock','requirements-desktop.txt',
        'build_release.py','desktop_launcher.py','device.py','routes.py','playback.py','replay.py','replay_worker.py',
        'server.py','sdk_cli.py','cloud_server.py','relay.py','map_service.py','connector.py',
