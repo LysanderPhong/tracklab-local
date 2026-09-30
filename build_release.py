@@ -5,10 +5,10 @@ import json
 import zipfile
 
 ROOT=Path(__file__).resolve().parent
-VERSION='0.5.2-beta'
+from version import VERSION
 FILES=['README.md','THIRD_PARTY.md','LICENSE','.gitignore','pyproject.toml','uv.lock','requirements-desktop.txt',
        'build_release.py','desktop_launcher.py','device.py','routes.py','playback.py','replay.py','replay_worker.py',
-       'server.py','sdk_cli.py','cloud_server.py','relay.py','map_service.py','connector.py',
+       'server.py','sdk_cli.py','map_service.py','web_assets.py','version.py',
        '一键连接-Mac.command','一键连接-Windows.cmd','安装连接程序-Windows.cmd']
 
 def build():

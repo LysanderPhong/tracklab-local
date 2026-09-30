@@ -2,13 +2,12 @@
 from __future__ import annotations
 
 import json
-import math
+import hashlib
 import os
 from pathlib import Path
 import secrets
 import signal
 import threading
-import time
 from urllib.parse import urlsplit, parse_qs
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -16,10 +15,11 @@ import device
 import routes
 from replay import runner
 import map_service
-from cloud_server import asset
-from relay import RelayError
+from web_assets import asset
+from version import VERSION
 
 ROOT = Path(__file__).resolve().parent
+INSTANCE = hashlib.sha256(str(ROOT).encode()).hexdigest()[:16]
 PORT = int(os.environ.get("TRACKLAB_PORT", "8769"))
 TOKEN = secrets.token_urlsafe(32)
 LOCK = threading.Lock()
@@ -51,10 +51,17 @@ def reconcile():
 
 def clear_all():
     target = expected_target()
+    try:
+        pending_run = json.loads(MARKER.read_text()).get('run_id') if MARKER.exists() else None
+    except (ValueError, AttributeError):
+        pending_run = None
     if runner.status().get('active'):
         runner.stop_and_wait()
-    reconcile()
-    # Also send an independent clear, including if the worker exited abnormally.
+    state = reconcile()
+    # The worker already cleared this exact run through its open connection.
+    # A failed or unacknowledged stop still needs the independent fallback.
+    if pending_run and state.get('run_id') == pending_run and state.get('cleared') and not state.get('active'):
+        return {'message': '清除指令已发送。请打开手机地图确认恢复到实际位置。'}
     result = device.clear_location(target)
     mark_pending(False)
     return result
@@ -72,32 +79,25 @@ def expected_target() -> str | None:
         raise device.DeviceError("恢复记录无法读取。请先在原手机上重启并确认实际定位，再联系我处理记录。") from None
 
 
-def coordinate(data: dict, name: str, limit: float) -> float:
-    value = data.get(name)
-    if isinstance(value, bool) or not isinstance(value, (float, int)):
-        raise ValueError("请输入有效的经纬度数字。")
-    value = float(value)
-    if not math.isfinite(value) or abs(value) > limit:
-        raise ValueError("经纬度超出范围。")
-    return value
-
-
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_):
         pass
 
-    def respond(self, code: int, body, content_type="application/json; charset=utf-8"):
+    def respond(self, code: int, body, content_type="application/json; charset=utf-8", cache="no-store", etag=None):
         if not isinstance(body, bytes):
             body = json.dumps(body, ensure_ascii=False).encode()
         self.send_response(code)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", cache)
+        if etag:
+            self.send_header("ETag", etag)
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
         self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://tile.openstreetmap.org; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
         self.end_headers()
-        self.wfile.write(body)
+        if code != 304:
+            self.wfile.write(body)
 
     def host_allowed(self) -> bool:
         return self.headers.get("Host") in {f"127.0.0.1:{PORT}", f"localhost:{PORT}"}
@@ -106,7 +106,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self.host_allowed():
             return self.respond(403, {"error": "仅允许本机访问。"})
         if self.path == '/api/config':
-            return self.respond(200, {'mode': 'local', 'version': '0.4.0'})
+            return self.respond(200, {'mode': 'local', 'version': VERSION, 'instance': INSTANCE})
         path = urlsplit(self.path)
         try:
             if path.path == '/api/route-preset':
@@ -118,13 +118,15 @@ class Handler(BaseHTTPRequestHandler):
             if path.path == '/api/tracks':
                 params = parse_qs(path.query)
                 return self.respond(200, map_service.tracks(params.get('lat', [''])[0], params.get('lon', [''])[0]))
-            if path.path.startswith('/tiles/'):
-                return self.respond(200, map_service.tile(path.path), 'image/png')
             if path.path == '/' or path.path == '/fixed' or path.path == '/connect' or path.path.startswith('/portal/'):
                 found = asset(path.path)
                 if found:
-                    return self.respond(200, *found)
-        except RelayError as error:
+                    body, kind = found
+                    etag = '"' + hashlib.sha256(body).hexdigest() + '"'
+                    if self.headers.get('If-None-Match') == etag:
+                        return self.respond(304, body, kind, cache='no-cache', etag=etag)
+                    return self.respond(200, body, kind, cache='no-cache', etag=etag)
+        except map_service.MapError as error:
             return self.respond(error.status, {'error': str(error)})
         if self.path in {"/api/bootstrap", "/api/status"}:
             # A device check can take 15 seconds. Status is read-only and can
@@ -133,7 +135,8 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 state = reconcile() if acquired else runner.status()
                 result = {"needs_clear": MARKER.exists(), "replay": state,
-                          "operation_pending": not acquired, "version": "0.4.0"}
+                          "operation_pending": not acquired, "version": VERSION, "instance": INSTANCE,
+                          "shutdown_supported": True}
                 if self.path == "/api/bootstrap":
                     result['token'] = TOKEN
             finally:
@@ -159,49 +162,41 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("请求格式错误。")
         except (ValueError, UnicodeDecodeError):
             return self.respond(400, {"error": "请求格式错误。"})
-        if self.path not in {"/api/scan", "/api/set", "/api/clear", "/api/preview", "/api/start", "/api/pause", "/api/resume", "/api/stop", "/api/fixed", "/api/keepalive"}:
+        if self.path == '/api/preview':
+            # Route calculation does not read or mutate the connected phone.
+            try:
+                return self.respond(200, routes.preview(routes.build_plan(data)))
+            except ValueError as error:
+                return self.respond(400, {'error': str(error)})
+        if self.path not in {"/api/shutdown", "/api/scan", "/api/clear", "/api/start", "/api/pause", "/api/resume", "/api/stop", "/api/fixed"}:
             return self.respond(404, {"error": "操作不存在。"})
         if not LOCK.acquire(blocking=False):
             return self.respond(409, {"error": "正在处理设备操作，请稍候。"})
         try:
             state = reconcile()
-            if state.get('active') and self.path in {'/api/scan', '/api/set', '/api/start', '/api/fixed'}:
+            if state.get('active') and self.path in {'/api/scan', '/api/start', '/api/fixed'}:
                 raise device.DeviceError('已有路线正在回放，请先停止并恢复定位。')
+            if self.path == '/api/shutdown':
+                if state.get('active') or MARKER.exists():
+                    return self.respond(409, {'error': '定位尚在运行或待恢复，请先恢复真实定位。'})
+                self.respond(200, {'stopped': True, 'version': VERSION, 'instance': INSTANCE})
+                threading.Thread(target=self.server.shutdown, daemon=True).start()
+                return
             if self.path == "/api/scan":
                 result = device.scan()
-            elif self.path == '/api/preview':
-                result = routes.preview(routes.build_plan(data))
-            elif self.path == '/api/keepalive':
-                runner.keepalive(data.get('run_id'))
-                result = {'ok': True}
             elif self.path in {'/api/start', '/api/fixed'}:
                 demo = data.get('demo', False)
                 if not isinstance(demo, bool):
                     raise ValueError('试播选项无效。')
                 plan = routes.fixed_plan(data) if self.path == '/api/fixed' else routes.build_plan(data, demo=demo)
-                lease = data.get('remote_lease', False)
-                if not isinstance(lease, bool):
-                    raise ValueError('远程连接选项无效。')
                 if MARKER.exists():
                     raise device.DeviceError('上次模拟尚未确认清除，请先使用恢复按钮。')
                 ready = device.require_ready()
                 run_id = secrets.token_hex(12)
                 mark_pending(True, device.fingerprint(ready['_serial']), run_id)
-                if lease:
-                    lease_file = ROOT / 'runtime' / f'lease-{run_id}'
-                    lease_file.write_text(str(time.monotonic()))
-                    plan['lease_path'] = str(lease_file)
                 result = {'replay': runner.start(ready, plan, run_id)}
             elif self.path in {'/api/pause', '/api/resume', '/api/stop'}:
                 result = {'replay': runner.control(self.path.rsplit('/', 1)[1])}
-            elif self.path == "/api/set":
-                lat, lon = coordinate(data, "latitude", 90), coordinate(data, "longitude", 180)
-                # Persist BEFORE issuing the command: timeout does not imply no side effect.
-                ready = device.require_ready()
-                if MARKER.exists():
-                    raise device.DeviceError("上次模拟尚未确认清除，请先使用恢复按钮。")
-                mark_pending(True, device.fingerprint(ready["_serial"]))
-                result = device.set_location(ready, lat, lon)
             else:
                 result = clear_all()
             result["needs_clear"] = MARKER.exists()

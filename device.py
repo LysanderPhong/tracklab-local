@@ -3,19 +3,14 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import logging
 import os
 import platform
 from pathlib import Path
-import queue
 import subprocess
 import sys
-import threading
-import time
 
 ROOT = Path(__file__).resolve().parent
 SOCKET = "127.0.0.1:27015" if platform.system() == "Windows" else "/var/run/usbmuxd"
-_active: subprocess.Popen | None = None
 
 
 class DeviceError(Exception):
@@ -123,45 +118,10 @@ def _finish_process(process: subprocess.Popen) -> None:
             process.wait(timeout=5)
 
 
-def set_location(ready: dict, latitude: float, longitude: float) -> dict:
-    global _active
-    if _active is not None and _active.poll() is None:
-        raise DeviceError("已有测试位置正在生效，请先清除模拟，再发送新的位置。")
-    process = subprocess.Popen(_command("set", ready["_serial"], "--", str(latitude), str(longitude)), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=_environment(), cwd=ROOT)
-    _active = process
-    lines: queue.Queue = queue.Queue()
-    def drain():
-        try:
-            for line in process.stdout:
-                lines.put(line)
-        finally:
-            lines.put(None)
-    threading.Thread(target=drain, daemon=True).start()
-    deadline, output = time.monotonic() + 45, ""
-    while time.monotonic() < deadline:
-        try:
-            line = lines.get(timeout=0.25)
-        except queue.Empty:
-            continue
-        if line is None:
-            break
-        output = (output + line)[-12000:]
-        # 11.19.2 prints this only AFTER LocationSimulation.set returns.
-        if "Press Ctrl+C to send a SIGINT" in line and process.poll() is None:
-            return {"message": "定位接口已接受指令。请打开手机地图观察位置；完成后点击清除模拟。实际显示仍需你确认。"}
-    _finish_process(process)
-    _active = None
-    raise DeviceError(_failure(output) + " 清除状态未确认，请使用恢复按钮。")
-
-
 def clear_location(expected_fingerprint: str | None = None) -> dict:
-    global _active
     ready = require_ready()
     if expected_fingerprint and fingerprint(ready["_serial"]) != expected_fingerprint:
         raise DeviceError("连接的不是上次测试的那台手机。请连接原手机，再清除模拟位置。")
-    if _active is not None:
-        _finish_process(_active)
-        _active = None
     try:
         result = subprocess.run(_command("clear", ready["_serial"]), stdin=subprocess.DEVNULL, capture_output=True, text=True, env=_environment(), cwd=ROOT, timeout=45)
     except subprocess.TimeoutExpired:

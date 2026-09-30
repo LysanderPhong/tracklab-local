@@ -3,7 +3,6 @@ import json
 import subprocess
 import sys
 import threading
-import time
 from pathlib import Path
 import device
 import routes
@@ -16,6 +15,8 @@ class Replay:
         self.lock = threading.RLock()
         self.process = None
         self.connected = threading.Event()
+        self.finished = threading.Event()
+        self.finished.set()
         self.info = {'state': 'idle', 'active': False, 'cleared': False}
 
     def status(self):
@@ -44,26 +45,16 @@ class Replay:
                          'device_version': ready.get('version', ''),
                          'demo': plan['demo'], **routes.frame(plan, 0)}
             self.connected = threading.Event()
-            threading.Thread(target=self._read, args=(self.process, plan_file), daemon=True).start()
+            self.finished = threading.Event()
+            threading.Thread(target=self._read, args=(self.process, plan_file, self.finished), daemon=True).start()
             threading.Thread(target=self._deadline, args=(self.process, self.connected), daemon=True).start()
             return self.status()
-
-    def keepalive(self, run_id):
-        with self.lock:
-            if not self.info.get('active') or self.info.get('run_id') != run_id:
-                raise device.DeviceError('固定定位会话已结束。')
-            lease = ROOT / 'runtime' / f'lease-{run_id}'
-            if not lease.exists():
-                raise device.DeviceError('该会话不接受远程续期。')
-            temporary = lease.with_suffix('.tmp')
-            temporary.write_text(str(time.monotonic()))
-            temporary.replace(lease)
 
     def _deadline(self, process, connected):
         if not connected.wait(50) and process.poll() is None:
             device._finish_process(process)
 
-    def _read(self, process, plan_file):
+    def _read(self, process, plan_file, finished):
         try:
             for line in process.stdout:
                 if not line.startswith('TRACKLAB_EVENT '):
@@ -82,7 +73,6 @@ class Replay:
                     self.info['state'] = 'failed'
         finally:
             plan_file.unlink(missing_ok=True)
-            (plan_file.parent / plan_file.stem.replace('plan-', 'lease-')).unlink(missing_ok=True)
             if process.stdin:
                 process.stdin.close()
             if process.stdout:
@@ -93,6 +83,7 @@ class Replay:
                 if self.info['state'] not in {'finished', 'stopped', 'failed'}:
                     self.info['state'] = 'failed'
                 self.info['active'] = False
+                finished.set()
 
     def control(self, command):
         with self.lock:
@@ -110,13 +101,23 @@ class Replay:
     def stop_and_wait(self):
         with self.lock:
             process = self.process
-            if not process or process.poll() is not None:
-                return
-        self.control('stop')
-        try:
-            process.wait(timeout=15)
-        except subprocess.TimeoutExpired:
-            device._finish_process(process)
+            finished = self.finished
+        if not process:
+            return self.status()
+        if process.poll() is None:
+            try:
+                self.control('stop')
+            except device.DeviceError:
+                # It may have exited between poll and the stdin write.
+                pass
+            try:
+                process.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                device._finish_process(process)
+        # Process exit can precede the stdout reader's final cleared/inactive
+        # publication. Do not decide whether fallback clear is needed early.
+        finished.wait(timeout=2)
+        return self.status()
 
 
 runner = Replay()

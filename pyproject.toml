@@ -1,6 +1,6 @@
 [project]
 name = "tracklab-local"
-version = "0.4.0"
+version = "0.5.3b0"
 description = "Local iPhone location simulation feasibility workbench"
 requires-python = ">=3.12,<3.13"
 dependencies = ["pymobiledevice3==11.19.2"]

@@ -14,7 +14,7 @@
 
 ## 先下载
 
-**[点这里下载本地版 ZIP](https://github.com/LysanderPhong/tracklab-local/releases/download/v0.5.2-beta/TrackLab-Local-0.5.2-beta.zip)** · [查看版本说明](https://github.com/LysanderPhong/tracklab-local/releases)
+**[点这里下载本地版 ZIP](https://github.com/LysanderPhong/tracklab-local/releases/download/v0.5.3-beta/TrackLab-Local-0.5.3-beta.zip)** · [查看版本说明](https://github.com/LysanderPhong/tracklab-local/releases)
 
 下载后先把整个压缩包解压出来，不要在压缩包里直接双击运行。
 
@@ -104,6 +104,7 @@ uv run python desktop_launcher.py
 uv run python -m unittest discover -s tests -q
 node tests/test_connection_state.cjs
 node tests/test_restart_fixed.cjs
+node tests/test_ui_responsiveness.cjs
 python3 build_release.py
 ```
 
@@ -111,7 +112,13 @@ python3 build_release.py
 
 安装依赖中途失败时，可以重新执行 `uv sync --locked`；使用 Python 安装的，则用项目 `.venv` 里的 Python 执行 `-m pip install --require-hashes -r requirements-desktop.txt`。
 
-本地服务只监听 `127.0.0.1`，不开放到局域网。重复启动会复用已有服务；升级前先恢复手机定位并退出旧后台进程，不要在定位运行中覆盖环境。
+本地服务只监听 `127.0.0.1`，不开放到局域网。同一份包重复启动会复用已有服务；页面右上角可以“退出本机服务”，运行中或待恢复时不会允许退出。升级前先恢复手机定位，再解压新包；支持安全退出的旧服务会自动退出，然后启动新包。更早的 0.4/0.5.2 包不支持自动退出，需要先结束旧后台进程。
+
+### 地图或按钮卡住怎么办？
+
+先看页面右上角是否显示 **0.5.3-beta**。旧版可能还在后台运行，单纯下载新包并不一定换掉旧服务。
+
+这一版让浏览器直接加载和缓存底图；查跑道期间可以继续选点和切换模式。路线默认只显示线，想拖动路线点时点“调整路线点”，完成后重新检查路线。没有查到跑道时也可以手动画线，不用一直等在线查询。地图与地名服务的网速仍会影响显示。
 
 ## 开源许可
 

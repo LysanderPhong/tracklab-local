@@ -23,8 +23,10 @@ class LocalPackageTests(unittest.TestCase):
             release=json.loads(z.read('TrackLab-Local/RELEASE.json'))
             for name,digest in release['sha256'].items():
                 self.assertEqual(hashlib.sha256(z.read('TrackLab-Local/'+name)).hexdigest(),digest)
-            for name in ['LICENSE','server.py','desktop_launcher.py','requirements-desktop.txt','一键连接-Mac.command']:
+            for name in ['LICENSE','server.py','desktop_launcher.py','version.py','web_assets.py','requirements-desktop.txt','一键连接-Mac.command']:
                 self.assertIn(name,release['sha256'])
+            for obsolete in ['cloud_server.py','relay.py','connector.py','portal/connect.js']:
+                self.assertNotIn(obsolete,release['sha256'])
 
     def test_local_root_and_guide_work_without_legacy_assets_or_cloud(self):
         http=server.ThreadingHTTPServer(('127.0.0.1',0),server.Handler)

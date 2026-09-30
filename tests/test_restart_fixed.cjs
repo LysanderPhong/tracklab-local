@@ -3,12 +3,12 @@ const fs=require('node:fs');
 const vm=require('node:vm');
 const {startReason}=require('../portal/connection-state.js');
 const source=fs.readFileSync(require.resolve('../portal/app.js'),'utf8');
-const send=source.slice(source.indexOf('async function send('),source.indexOf("$('scan').onclick"));
+const send=source.slice(source.indexOf('async function send('),source.indexOf("$('clear').onclick"));
 async function scenario({clearFails=false,scanFails=false,needsClear=false,ready=true}={}){
  const calls=[],notes=[];
- const context=vm.createContext({busy:false,mode:'local',device:{ready:true,active:true},controls(){},note(...args){notes.push(args)},
+ const context=vm.createContext({busy:false,busyAction:'',operationPending:false,statusEpoch:0,editing:false,device:{ready:true,active:true},controls(){},stopAnimation(){},drawRoute(){},applyStatus(){},note(...args){notes.push(args)},
   async api(path){calls.push(path);if(path==='/api/clear'&&clearFails)throw Error('clear failed');if(path==='/api/scan'){if(scanFails)throw Error('scan failed');return {ready,message:'device checked'}}return {message:'cleared'}},
-  async pollOnce(){context.device.active=false;context.device.needs_clear=needsClear;return true}
+  async pollFresh(){context.device.active=false;context.device.needs_clear=needsClear||clearFails;return true}
  });
  vm.runInContext(send,context);await context.send('clear');
  const reason=startReason({connected:true,online:true,ready:context.device.ready,active:context.device.active,needsClear:context.device.needs_clear,busy:context.busy,selected:true,operation:'fixed'});

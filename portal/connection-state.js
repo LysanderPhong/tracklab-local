@@ -1,8 +1,8 @@
 (function(root){
   function startReason(s){
-    if(!s.connected)return '尚未连接：请启动连接器，并使用它打开的网页完成连接。';
+    if(!s.connected)return '尚未连接：请打开下载包内的一键连接文件。';
     if(s.busy)return '正在处理操作，请稍候。';
-    if(!s.online)return '连接程序离线：请保持程序运行，再点击“刷新连接状态”。';
+    if(!s.online)return '本机服务离线：请重新打开启动文件，再点击“刷新连接状态”。';
     if(s.waiting)return '正在等待设备操作结果，请稍候或刷新连接状态。';
     if(s.active)return '定位正在运行，请先点击“恢复真实定位”结束当前操作。';
     if(s.needsClear)return '上次定位尚未恢复，请先点击“恢复真实定位”。';
