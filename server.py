@@ -168,13 +168,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self.respond(200, routes.preview(routes.build_plan(data)))
             except ValueError as error:
                 return self.respond(400, {'error': str(error)})
-        if self.path not in {"/api/shutdown", "/api/scan", "/api/clear", "/api/start", "/api/pause", "/api/resume", "/api/stop", "/api/fixed"}:
+        if self.path not in {"/api/shutdown", "/api/prepare", "/api/scan", "/api/clear", "/api/start", "/api/pause", "/api/resume", "/api/stop", "/api/fixed"}:
             return self.respond(404, {"error": "操作不存在。"})
         if not LOCK.acquire(blocking=False):
             return self.respond(409, {"error": "正在处理设备操作，请稍候。"})
         try:
             state = reconcile()
-            if state.get('active') and self.path in {'/api/scan', '/api/start', '/api/fixed'}:
+            if state.get('active') and self.path in {'/api/prepare', '/api/scan', '/api/start', '/api/fixed'}:
                 raise device.DeviceError('已有路线正在回放，请先停止并恢复定位。')
             if self.path == '/api/shutdown':
                 if state.get('active') or MARKER.exists():
@@ -182,7 +182,11 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond(200, {'stopped': True, 'version': VERSION, 'instance': INSTANCE})
                 threading.Thread(target=self.server.shutdown, daemon=True).start()
                 return
-            if self.path == "/api/scan":
+            if self.path == '/api/prepare':
+                if MARKER.exists():
+                    raise device.DeviceError('上次定位尚待恢复，请先连接原手机并恢复，暂不准备新手机。')
+                result = device.prepare()
+            elif self.path == "/api/scan":
                 result = device.scan()
             elif self.path in {'/api/start', '/api/fixed'}:
                 demo = data.get('demo', False)

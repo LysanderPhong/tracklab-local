@@ -6,6 +6,7 @@ import hashlib
 import os
 import platform
 from pathlib import Path
+import re
 import subprocess
 import sys
 
@@ -21,33 +22,121 @@ def fingerprint(serial: str) -> str:
     return hashlib.sha256(serial.encode()).hexdigest()
 
 
-async def _inspect() -> dict:
+def _result(base: dict, stage: str, badge: str, title: str, message: str,
+            *, next_action: str = "", **extra) -> dict:
+    return base | {"stage": stage, "badge": badge, "title": title,
+                   "message": message, "next_action": next_action} | extra
+
+
+def _preparation_error(base: dict, error: Exception) -> dict:
+    # Error text can contain device identifiers. Return only our own messages.
+    name = type(error).__name__
+    if name == "PairingDialogResponsePendingError":
+        return _result(base, "trust_pending", "等待信任", "请在手机上确认信任",
+                       "连接请求已发送。请解锁手机，点“信任”并输入手机密码，然后再次一键连接。", next_action="prepare")
+    if name == "UserDeniedPairingError":
+        return _result(base, "trust_denied", "信任被拒绝", "手机拒绝了信任请求",
+                       "请在手机上允许信任这台电脑，再次一键连接；若不再弹窗，可先拔插数据线。", next_action="prepare")
+    if name in {"PasswordRequiredError", "PasscodeRequiredError", "DeviceHasPasscodeSetError"}:
+        return _result(base, "locked", "请解锁", "需要在手机上完成确认",
+                       "请解锁手机并确认信任，再次一键连接。程序不会修改或要求移除手机密码。", next_action="prepare")
+    if name in {"MCProtectedError", "GetProhibitedError", "SetProhibitedError"}:
+        return _result(base, "prepare_failed", "请求被限制", "手机拒绝了连接准备请求",
+                       "系统限制了此请求。若手机由学校或单位管理，请向管理员确认是否允许；程序不能代替管理员解除限制。", next_action="prepare")
+    return _result(base, "prepare_failed", "准备未完成", "未能显示开发者模式入口",
+                   "手机未确认此请求成功。请保持解锁后重试；仍没有入口时，可用 Xcode 的设备管理界面配对，再检查手机设置。", next_action="prepare")
+
+
+async def _check(*, prepare: bool) -> dict:
     from pymobiledevice3.usbmux import list_devices
     from pymobiledevice3.lockdown import create_using_usbmux
     devices = [d for d in await list_devices(usbmux_address=SOCKET) if d.is_usb]
-    base = {"connected": False, "ready": False, "model": "", "version": ""}
+    base = {"connected": False, "ready": False, "model": "", "version": "",
+            "developer_mode": "unknown", "revealed": False}
     if not devices:
-        return base | {"badge": "未连接", "title": "还没有检测到 iPhone", "message": "请用支持数据传输的线连接手机，解锁后再次检查。"}
+        return _result(base, "disconnected", "未连接", "还没有检测到 iPhone",
+                       "请用支持数据传输的线连接手机，解锁后再次一键连接。")
     if len(devices) != 1:
-        return base | {"badge": "多台设备", "title": "检测到多台 Apple 设备", "message": "请仅保留需要测试的 iPhone 的 USB 连接，再次检查。"}
+        return _result(base, "multiple_devices", "多台设备", "检测到多台 Apple 设备",
+                       "请仅保留需要测试的 iPhone 的 USB 连接，再次一键连接。")
     serial = devices[0].serial
-    client = await create_using_usbmux(serial=serial, autopair=False, connection_type="USB", pairing_records_cache_folder=ROOT / "runtime" / "pair-cache", usbmux_address=SOCKET)
+    base.update(connected=True, _serial=serial)
+    try:
+        client = await create_using_usbmux(serial=serial, autopair=False, connection_type="USB", pairing_records_cache_folder=ROOT / "runtime" / "pair-cache", usbmux_address=SOCKET)
+    except Exception as error:
+        return _preparation_error(base, error)
     try:
         values = client.all_values
         base.update(connected=True, model=str(values.get("ProductType", "iPhone")), version=str(values.get("ProductVersion", "未知")), _serial=serial)
         if values.get("DeviceClass") != "iPhone":
-            return base | {"badge": "设备不符", "title": "当前连接的不是 iPhone", "message": "第一版仅验证 iPhone，请连接目标手机。"}
+            return _result(base, "unsupported_device", "设备不符", "当前连接的不是 iPhone",
+                           "当前仅验证 iPhone，请连接目标手机。")
         if not client.paired:
-            return base | {"badge": "等待信任", "title": "手机已连接，需要信任电脑", "message": "请在电脑的苹果设备管理界面选择 iPhone 并点击信任，再在手机上确认；完成后重新检查。"}
+            if not prepare:
+                return _result(base, "trust_required", "等待信任", "手机已连接，需要信任电脑",
+                               "点“一键连接”，再在手机上确认“信任”并输入手机密码。", next_action="prepare")
+            try:
+                await client.pair(timeout=30)
+                # pair() writes a record; validate_pairing() establishes the SSL session.
+                if not await client.validate_pairing():
+                    return _result(base, "trust_required", "等待信任", "信任尚未完成",
+                                   "请确认手机已信任这台电脑，再次一键连接。", next_action="prepare")
+                values = client.all_values
+                base.update(model=str(values.get("ProductType", "iPhone")), version=str(values.get("ProductVersion", "未知")))
+            except Exception as error:
+                return _preparation_error(base, error)
+
+        version = base["version"]
+        if not re.fullmatch(r"\d+(?:\.\d+)*", version) or int(version.split(".")[0]) < 1:
+            return _result(base, "version_unknown", "版本待确认", "无法确认手机的 iOS 版本",
+                           "请解锁手机后重新检查。暂不发送开发者模式请求，也不能确认定位服务兼容性。", next_action="prepare")
+        if int(version.split(".")[0]) < 16:
+            return _result(base, "ready", "已连接", "iPhone 连接就绪",
+                           "此 iOS 版本没有开发者模式开关要求。定位服务是否兼容仍需以实际执行结果为准。", ready=True, developer_mode="not_required")
+
         try:
             enabled = await client.get_developer_mode_status()
-        except Exception:
-            return base | {"badge": "状态待确认", "title": "无法读取开发者模式", "message": "请保持手机解锁，检查“设置 → 隐私与安全性 → 开发者模式”，然后重新检查。"}
-        if not enabled:
-            return base | {"badge": "需开发者模式", "title": "电脑已获信任，开发者模式未开启", "message": "在手机“设置 → 隐私与安全性 → 开发者模式”开启，按手机提示重启并确认，再次检查。若没有该选项，请告诉我。"}
-        return base | {"ready": True, "badge": "已连接", "title": "iPhone 连接就绪", "message": "USB、信任状态和开发者模式均已就绪。回放期间请保留数据线连接。"}
+            base["developer_mode"] = "enabled" if enabled else "disabled"
+        except Exception as error:
+            enabled = False
+            if type(error).__name__ in {"PasswordRequiredError", "PasscodeRequiredError", "MCProtectedError", "GetProhibitedError", "SetProhibitedError"}:
+                return _preparation_error(base, error)
+            if not prepare:
+                return _result(base, "developer_mode_unknown", "状态待确认", "无法读取开发者模式",
+                               "请解锁手机后点“一键连接”；如果设置里没有入口，程序会尝试显示它。", next_action="prepare")
+        if enabled:
+            return _result(base, "ready", "已连接", "iPhone 连接就绪",
+                           "USB、信任状态和开发者模式均已就绪。回放期间请保留数据线连接。", ready=True)
+        if prepare:
+            try:
+                # Only reveal the Settings toggle. Actions 1/2 reboot or confirm
+                # Developer Mode and must remain under the phone owner's control.
+                service = await client.start_lockdown_service("com.apple.amfi.lockdown")
+                try:
+                    response = await service.send_recv_plist({"action": 0})
+                finally:
+                    await service.close()
+                if response.get("success") is not True:
+                    return _result(base, "prepare_failed", "请求未成功", "手机未确认开发者模式入口已显示",
+                                   "请保持手机解锁后重试；若仍无入口，可用 Xcode 配对。受管理的手机也可能被系统策略限制，需由管理员确认。", next_action="prepare")
+            except Exception as error:
+                return _preparation_error(base, error)
+            return _result(base, "developer_mode_required", "需手机确认", "已请求显示开发者模式入口",
+                           "在手机“设置 → 隐私与安全性 → 开发者模式”开启，按手机提示重启并确认，再点“一键连接”。若设置已打开，请退出后重新进入。", next_action="prepare", revealed=True)
+        return _result(base, "developer_mode_required", "需开发者模式", "电脑已获信任，开发者模式未开启",
+                       "点“一键连接”显示入口，再到手机“设置 → 隐私与安全性 → 开发者模式”开启，按手机提示重启并确认。", next_action="prepare")
     finally:
         await client.close()
+
+
+async def _inspect() -> dict:
+    """Read device readiness without prompting trust or changing phone settings."""
+    return await _check(prepare=False)
+
+
+async def _prepare() -> dict:
+    """Request trust and reveal the Settings toggle; never enable or reboot."""
+    return await _check(prepare=True)
 
 
 def _inspection() -> dict:
@@ -66,6 +155,16 @@ def _inspection() -> dict:
 
 def scan() -> dict:
     return {k: v for k, v in _inspection().items() if not k.startswith("_")}
+
+
+def prepare() -> dict:
+    try:
+        result = asyncio.run(asyncio.wait_for(_prepare(), timeout=45))
+    except TimeoutError:
+        raise DeviceError("连接准备超时。请在手机上完成信任或解锁后，再次一键连接。") from None
+    except Exception as error:
+        raise DeviceError(f"连接准备失败（{type(error).__name__}）。请检查 USB 连接并保持手机解锁。") from None
+    return {k: v for k, v in result.items() if not k.startswith("_")}
 
 
 def require_ready() -> dict:

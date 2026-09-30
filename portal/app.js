@@ -61,7 +61,9 @@ function text(id,value){if($(id).textContent!==value)$(id).textContent=value;}
 function controls(){
   const connected=!!localToken,blocked=busy||operationPending;
   $('refresh-connection').disabled=blocked||refreshing;
-  text('refresh-connection',refreshing?'正在检查…':'刷新连接状态');
+  text('refresh-connection',busyAction==='prepare'?'正在连接…':refreshing?'正在检查…':device.ready?'刷新连接状态':'一键连接');
+  $('device-steps').hidden=!(device.revealed||device.next_action==='prepare');
+  text('device-steps',device.revealed?'请在 iPhone 打开 设置 → 隐私与安全性 → 开发者模式，开启后按提示重启并确认；回到这里点一键连接。':device.next_action==='prepare'?'首次使用这部手机：点一键连接，再在手机上确认信任和开发者模式。':'');
   const reason=TrackConnection.startReason({connected,busy:blocked||refreshing,online,ready:device.ready,active:device.active,needsClear:device.needs_clear,selected,operation,preview:routePreview,confirmed:$('confirm-route').checked,drawing,supported:true});
   $('start').disabled=!!reason;text('start-reason',reason||'设备和地点均已就绪，可以开始。');$('start').title=reason;
   $('route-demo').disabled=$('start').disabled;
@@ -98,26 +100,26 @@ $('search-form').onsubmit=async e=>{
   }catch(error){$('search-info').textContent=error.message;}finally{$('search-button').disabled=false;}
 };
 async function send(action,payload={}){
-  if(busy||operationPending)return;if(action!=='scan'){stopAnimation();editing=false;drawRoute();}busy=true;busyAction=action;controls();
-  const inProgress={scan:'正在检查手机连接…',clear:'正在恢复真实定位，请保持手机连接…',fixed:'正在检查设备并启动固定定位…',route:'正在检查设备并启动动态路线…'};
+  if(busy||operationPending)return;if(!['scan','prepare'].includes(action)){stopAnimation();editing=false;drawRoute();}else{device={...device,ready:false,revealed:false};}busy=true;busyAction=action;controls();
+  const inProgress={scan:'正在检查手机连接…',prepare:'正在连接新手机；如果出现信任提示，请在手机上确认…',clear:'正在恢复真实定位，请保持手机连接…',fixed:'正在检查设备并启动固定定位…',route:'正在检查设备并启动动态路线…'};
   if(inProgress[action])note(inProgress[action]);
   try{
     const result=await api('/api/'+(action==='route'?'start':action),payload,true,75000);
     statusEpoch++;applyStatus({replay:result.replay||{},needs_clear:result.needs_clear??device.needs_clear,operation_pending:false});
-    if(action==='scan'){device={...device,ready:result.ready,message:result.message};note(result.message);}
+    if(action==='scan'||action==='prepare'){device={...device,...result};note(result.message,!result.ready&&!result.revealed);}
     if(action==='clear'){
       device.ready=false;note(result.message);
       if(await pollFresh()&&!device.active&&!device.needs_clear){
         try{
           const scan=await api('/api/scan',{},true,20000);
-          device={...device,ready:scan.ready,message:scan.message};
+          device={...device,...scan};
           note(scan.ready?'恢复指令已完成，设备已就绪，可以选择新地点再次开始。请在手机地图核实真实位置。':scan.message,!scan.ready);
         }catch(error){note('恢复指令已完成，但设备检查失败：'+error.message,true);}
       }
     }
     if(action==='route'||action==='fixed')note('定位已启动，请在手机地图检查位置。');
     if(action!=='clear')await pollFresh();
-  }catch(error){statusEpoch++;operationPending=true;await pollFresh();note(error.message,true);}finally{busy=false;busyAction="";controls();}
+  }catch(error){statusEpoch++;operationPending=true;await pollFresh();if(action==='scan'||action==='prepare')device={...device,ready:false,message:error.message,next_action:'prepare'};note(error.message,true);}finally{busy=false;busyAction="";controls();}
 }
 $('clear').onclick=()=>send('clear');
 $('exit-service').onclick=async()=>{
@@ -151,7 +153,7 @@ async function refreshConnection(){
   refreshing=true;controls();
   try{
     if(!await pollOnce())return;
-    if(!device.active&&!device.needs_clear&&!operationPending)await send('scan');
+    if(!device.active&&!device.needs_clear&&!operationPending)await send('prepare');
     else note('已刷新当前状态，定位运行或待恢复期间不重复扫描。');
   }finally{refreshing=false;controls();}
 }

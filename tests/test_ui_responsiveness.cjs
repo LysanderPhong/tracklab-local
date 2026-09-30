@@ -185,7 +185,40 @@ async function unknownDeviceResultKeepsTargetLocked() {
   assert.equal(f.run('targetLocked()'), true, 'unknown device result must keep the target stable');
 }
 
+async function oneClickPreparesMissingDeveloperMode() {
+  const f = await fixture();
+  f.run("device={ready:false,active:false,next_action:'prepare',developer_mode:'disabled'};controls()");
+  const before=f.defer('/api/status'),after=f.defer('/api/status'),prepared=f.defer('/api/prepare'),done=f.click('refresh-connection');await flush();
+  before.reply({needs_clear:false,operation_pending:false,replay:{active:false,state:'idle'}});await flush();
+  assert.equal(prepared.called,true,'one click must use preparation endpoint for a new phone');
+  prepared.reply({ready:false,connected:true,developer_mode:'disabled',next_action:'prepare',revealed:true,message:'check settings'});await flush();
+  after.reply({needs_clear:false,operation_pending:false,replay:{active:false,state:'idle'}});await done;
+  assert.equal(f.run('device.ready'),false,'revealing switch must not claim enabled');
+  assert.equal(f.elements.get('device-steps').hidden,false);
+  assert.ok(f.elements.get('device-steps').textContent.includes('重启'));
+  assert.equal(f.elements.get('start').disabled,true);
+  assert.equal(f.run('busy'),false);
+}
+
+async function preparationFailureClearsPreviousReadyAndAllowsRetry() {
+  const f=await fixture(); f.choose(); f.run("setOperation('fixed')");
+  assert.equal(f.run('device.ready'),true);
+  const before=f.defer('/api/status'),after=f.defer('/api/status'),prepared=f.defer('/api/prepare');
+  const done=f.click('refresh-connection');await flush();
+  before.reply(idle());await flush();
+  assert.equal(prepared.called,true);
+  assert.equal(f.run('device.ready'),false,'starting preparation must invalidate old-phone readiness');
+  prepared.reply({error:'phone did not respond'},422);await flush();
+  after.reply({needs_clear:false,operation_pending:false,replay:{active:false,state:'idle'}});await done;
+  assert.equal(f.run('device.ready'),false,'failed preparation must not reuse old-phone readiness');
+  assert.equal(f.elements.get('start').disabled,true);
+  assert.equal(f.elements.get('refresh-connection').disabled,false,'settled failure must allow one-click retry');
+  assert.ok(f.elements.get('connection-detail').textContent.includes('phone did not respond'));
+}
+
 (async () => {
+  await oneClickPreparesMissingDeveloperMode();
+  await preparationFailureClearsPreviousReadyAndAllowsRetry();
   await queryAndScanKeepMapUsable();
   await routeHandlesAreReused();
   await latePresetIsIgnored(false);

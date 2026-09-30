@@ -187,3 +187,29 @@ class ShutdownTests(unittest.TestCase):
                 if stop.called: break
                 time.sleep(.01)
             stop.assert_called_once()
+
+class PrepareHTTPTests(unittest.TestCase):
+    setUp = BackendHTTPTests.setUp
+    tearDown = BackendHTTPTests.tearDown
+    request = BackendHTTPTests.request
+
+    def test_prepare_is_authenticated_and_does_not_create_location_marker(self):
+        with tempfile.TemporaryDirectory() as temp, patch.object(server, 'MARKER', Path(temp)/'pending.json'), patch.object(server.runner, 'status', return_value={'active': False}), patch.object(device, 'prepare', create=True, return_value={'ready': False, 'revealed': True, 'message': 'check phone'}) as prepare:
+            self.assertEqual(self.request('/api/prepare', {}, {'X-TrackLab-Token': 'invalid'})[0], 403)
+            self.assertEqual(self.request('/api/prepare', {}, {'Origin': 'https://elsewhere.invalid'})[0], 403)
+            prepare.assert_not_called()
+            code, _, body = self.request('/api/prepare', {})
+            self.assertEqual(code, 200)
+            self.assertTrue(json.loads(body)['revealed'])
+            self.assertFalse(server.MARKER.exists())
+            prepare.assert_called_once()
+
+    def test_prepare_never_runs_during_location_or_pending_recovery(self):
+        with tempfile.TemporaryDirectory() as temp, patch.object(server, 'MARKER', Path(temp)/'pending.json'), patch.object(device, 'prepare', create=True) as prepare:
+            with patch.object(server.runner, 'status', return_value={'active': True, 'cleared': False}):
+                self.assertEqual(self.request('/api/prepare', {})[0], 422)
+            server.MARKER.write_text('{}')
+            with patch.object(server.runner, 'status', return_value={'active': False, 'cleared': False}):
+                self.assertEqual(self.request('/api/prepare', {})[0], 422)
+            prepare.assert_not_called()
+            self.assertTrue(server.MARKER.exists())

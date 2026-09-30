@@ -6,7 +6,7 @@
     if(s.waiting)return '正在等待设备操作结果，请稍候或刷新连接状态。';
     if(s.active)return '定位正在运行，请先点击“恢复真实定位”结束当前操作。';
     if(s.needsClear)return '上次定位尚未恢复，请先点击“恢复真实定位”。';
-    if(!s.ready)return '网页已连接，但手机尚未就绪。请点击“刷新连接状态”，按上方提示完成设备检查。';
+    if(!s.ready)return '网页已连接，但手机尚未就绪。请点击“一键连接”，按上方提示完成手机确认。';
     if(!s.selected)return '请选择一个地点：搜索后点击结果，或直接点击地图。';
     if(s.operation==='route'){
       if(!s.supported)return '当前连接器不支持动态路线，请更新连接器或切换固定定位。';

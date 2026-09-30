@@ -2,10 +2,11 @@
 <html lang="zh-CN">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><title>TrackLab · 动态与固定定位</title><link rel="stylesheet" href="/portal/vendor/leaflet.css"><link rel="stylesheet" href="/portal/style.css"></head>
 <body>
-<header class="top"><a class="brand" href="/">↗ <strong>TrackLab</strong><span>地点实验台</span></a><div><a href="/connect" class="help">连接指南 ↗</a> <button id="exit-service" class="link-button">退出本机服务</button></div></header>
+<header class="top"><a class="brand" href="/">↗ <strong>TrackLab</strong><span>地点实验台</span></a><div><a class="outline download-link" href="https://github.com/LysanderPhong/tracklab-local/releases/download/v0.5.4-beta/TrackLab-Local-0.5.4-beta.zip" download>下载一键连接包</a> <a href="/connect" class="help">连接指南 ↗</a> <button id="exit-service" class="link-button">退出本机服务</button></div></header>
 <main>
 <div class="heading"><div><p class="eyebrow">一个地点，清楚可控。</p><h1>选好地点，再出发。</h1><p class="intro">搜索名称、在地图上选点，随时恢复真实定位。</p></div><span id="version" class="version">本地版 · 正在连接</span></div>
-<nav class="mode-switch" aria-label="定位模式"><button id="mode-route" type="button" aria-pressed="true">动态定位 · 路线回放</button><button id="mode-fixed" type="button" aria-pressed="false">固定定位 · 单个地点</button></nav><section class="connection" aria-labelledby="connection-title"><span id="signal" class="signal"></span><div class="connection-copy"><h2 id="connection-title">先连接你的设备</h2><p id="connection-detail">用数据线连接并解锁 iPhone，等待自动检查；稍后插线可点刷新。</p></div><button id="refresh-connection" class="outline" type="button">刷新连接状态</button></section>
+<nav class="mode-switch" aria-label="定位模式"><button id="mode-route" type="button" aria-pressed="true">动态定位 · 路线回放</button><button id="mode-fixed" type="button" aria-pressed="false">固定定位 · 单个地点</button></nav><section class="connection" aria-labelledby="connection-title"><span id="signal" class="signal"></span><div class="connection-copy"><h2 id="connection-title">先连接你的设备</h2><p id="connection-detail">用数据线连接并解锁 iPhone，等待自动检查；新手机点“一键连接”，按手机提示完成设置。</p></div><button id="refresh-connection" class="outline" type="button">一键连接</button></section>
+<p id="device-steps" class="device-steps" role="status" hidden></p>
 <div class="workspace">
 <section class="map-panel" aria-label="搜索和选择地点">
 <form id="search-form" class="search-box"><span aria-hidden="true">⌕</span><label class="sr-only" for="query">搜索城市、街道或地点名称</label><input id="query" minlength="2" maxlength="120" placeholder="搜索城市、街道或地点名称" required autocomplete="off"><button id="search-button" class="dark">搜索</button></form>
